@@ -54,7 +54,7 @@ def create_directory(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
-def add_price_to_image(image_path, price):
+def add_price_to_image(image_path, price, size_option, folder_name, variant_id):
     try:
         img = Image.open(image_path).convert("RGB")
         draw = ImageDraw.Draw(img)
@@ -69,10 +69,15 @@ def add_price_to_image(image_path, price):
         x, y = img.width - text_width - 20, img.height - text_height - 20
         draw.rectangle([x - 10, y - 10, x + text_width + 10, y + text_height + 10], fill="#004AAD")
         draw.text((x, y), price_text, font=font, fill="white")
-        url = upload_image_to_r2(img, f"{size_option}/{folder_name}/{variant_id}.jpg")
+
+        # Upload to R2
+        key = f"{size_option}/{folder_name}/{variant_id}.jpg"
+        url = upload_image_to_r2(img, key)
         print(f"✅ Uploaded to {url}")
+
+        # Optional: remove local file
         if os.path.exists(image_path):
-        os.remove(image_path)
+            os.remove(image_path)
     except Exception as e:
         print(f"⚠️ Error processing image {image_path}: {e}")
 
@@ -134,7 +139,8 @@ def handle_variant_update(payload):
                     image_path = os.path.join(folder, image_file_name)
                     changed = download_image_if_new(image_url, image_path)
                     if changed:
-                        add_price_to_image(image_path, price)
+                        folder_name = "girls" if folder.endswith("girls") else "boys"
+                        add_price_to_image(image_path, price, size_option, folder_name, variant_id)
                         print(f"✅ Updated image for variant {variant_id} at {image_path}")
             else:
                 for folder in filter(None, [girls_directory, boys_directory]):
