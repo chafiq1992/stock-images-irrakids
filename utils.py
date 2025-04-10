@@ -3,14 +3,48 @@ import re
 import hashlib
 import requests
 from PIL import Image, ImageDraw, ImageFont
+import boto3
+from botocore.exceptions import ClientError
+from io import BytesIO
 
 # Shopify credentials (for optional lookups)
 API_KEY = 'your_api_key'
 PASSWORD = 'your_password'
 STORE_URL = 'https://your-store.myshopify.com'
 
+# R2 CONFIG
+R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY")
+R2_SECRET_KEY = os.getenv("R2_SECRET_KEY")
+R2_BUCKET = os.getenv("R2_BUCKET")
+R2_ENDPOINT = os.getenv("R2_ENDPOINT")  # e.g. "https://<account>.r2.cloudflarestorage.com"
+
 # Regex pattern to identify sizes
 size_pattern = re.compile(r'\b(?:XS|S|M|L|XL|XXL|XXXL)\b|\d+')
+
+# S3/R2 client
+s3 = boto3.client(
+    's3',
+    endpoint_url=R2_ENDPOINT,
+    aws_access_key_id=R2_ACCESS_KEY,
+    aws_secret_access_key=R2_SECRET_KEY
+)
+
+def upload_image_to_r2(image: Image.Image, key: str):
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+    buffer.seek(0)
+
+    try:
+        s3.upload_fileobj(
+            buffer,
+            R2_BUCKET,
+            key,
+            ExtraArgs={'ContentType': 'image/jpeg', 'ACL': 'public-read'}
+        )
+        return f"{R2_ENDPOINT}/{R2_BUCKET}/{key}"  # Public image URL
+    except ClientError as e:
+        print(f"❌ Upload failed: {e}")
+        return None
 
 # Utilities
 def sanitize_directory_name(name):
@@ -35,7 +69,8 @@ def add_price_to_image(image_path, price):
         x, y = img.width - text_width - 20, img.height - text_height - 20
         draw.rectangle([x - 10, y - 10, x + text_width + 10, y + text_height + 10], fill="#004AAD")
         draw.text((x, y), price_text, font=font, fill="white")
-        img.save(image_path, "JPEG")
+        url = upload_image_to_r2(img, f"{size_option}/{folder_name}/{variant_id}.jpg")
+        print(f"✅ Uploaded to {url}")
     except Exception as e:
         print(f"⚠️ Error processing image {image_path}: {e}")
 
