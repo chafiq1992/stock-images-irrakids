@@ -71,6 +71,8 @@ def add_price_to_image(image_path, price):
         draw.text((x, y), price_text, font=font, fill="white")
         url = upload_image_to_r2(img, f"{size_option}/{folder_name}/{variant_id}.jpg")
         print(f"✅ Uploaded to {url}")
+        if os.path.exists(image_path):
+        os.remove(image_path)
     except Exception as e:
         print(f"⚠️ Error processing image {image_path}: {e}")
 
