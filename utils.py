@@ -7,21 +7,19 @@ import boto3
 from botocore.exceptions import ClientError
 from io import BytesIO
 
-# Shopify credentials (for optional lookups)
-API_KEY = 'your_api_key'
-PASSWORD = 'your_password'
-STORE_URL = 'https://your-store.myshopify.com'
+# Load environment variables
+API_KEY = os.getenv("SHOPIFY_API_KEY")
+PASSWORD = os.getenv("SHOPIFY_PASSWORD")
+STORE_URL = os.getenv("SHOPIFY_STORE_URL")
 
-# R2 CONFIG
 R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY")
 R2_SECRET_KEY = os.getenv("R2_SECRET_KEY")
 R2_BUCKET = os.getenv("R2_BUCKET")
-R2_ENDPOINT = os.getenv("R2_ENDPOINT")  # e.g. "https://<account>.r2.cloudflarestorage.com"
+R2_ENDPOINT = os.getenv("R2_ENDPOINT")  # e.g. https://<account>.r2.cloudflarestorage.com
 
-# Regex pattern to identify sizes
 size_pattern = re.compile(r'\b(?:XS|S|M|L|XL|XXL|XXXL)\b|\d+')
 
-# S3/R2 client
+# Initialize S3 (R2)
 s3 = boto3.client(
     's3',
     endpoint_url=R2_ENDPOINT,
@@ -41,12 +39,11 @@ def upload_image_to_r2(image: Image.Image, key: str):
             key,
             ExtraArgs={'ContentType': 'image/jpeg', 'ACL': 'public-read'}
         )
-        return f"{R2_ENDPOINT}/{R2_BUCKET}/{key}"  # Public image URL
+        return f"{R2_ENDPOINT}/{R2_BUCKET}/{key}"
     except ClientError as e:
         print(f"❌ Upload failed: {e}")
         return None
 
-# Utilities
 def sanitize_directory_name(name):
     return re.sub(r'[<>:"/\\|?*]', '_', name)
 
@@ -70,12 +67,10 @@ def add_price_to_image(image_path, price, size_option, folder_name, variant_id):
         draw.rectangle([x - 10, y - 10, x + text_width + 10, y + text_height + 10], fill="#004AAD")
         draw.text((x, y), price_text, font=font, fill="white")
 
-        # Upload to R2
         key = f"{size_option}/{folder_name}/{variant_id}.jpg"
         url = upload_image_to_r2(img, key)
         print(f"✅ Uploaded to {url}")
 
-        # Optional: remove local file
         if os.path.exists(image_path):
             os.remove(image_path)
     except Exception as e:
@@ -93,7 +88,7 @@ def download_image_if_new(image_url, image_path):
             with open(image_path, "rb") as f:
                 existing_hash = hashlib.md5(f.read()).hexdigest()
             if existing_hash == new_hash:
-                return False  # No change
+                return False
         with open(image_path, "wb") as f:
             f.write(image_data)
         return True
@@ -101,8 +96,27 @@ def download_image_if_new(image_url, image_path):
         print(f"⚠️ Error downloading image: {e}")
         return False
 
+def fetch_all_products():
+    products = []
+    page = 1
+    while True:
+        url = f"{STORE_URL}/admin/api/2023-04/products.json?limit=250&page={page}"
+        response = requests.get(url, auth=(API_KEY, PASSWORD))
+        if response.status_code != 200:
+            print(f"❌ Failed to fetch products on page {page}")
+            break
+        batch = response.json().get("products", [])
+        if not batch:
+            break
+        products.extend(batch)
+        page += 1
+    return products
+
 def handle_variant_update(payload):
-    for product in payload.get("products", [payload]):  # support both batch and single
+    for product in payload.get("products", [payload]):
+        if not product.get("published_at"):  # skip unpublished
+            continue
+
         product_tags = product.get("tags", "").lower()
         is_girls = "girls" in product_tags
         is_boys = "boys" in product_tags
@@ -112,6 +126,10 @@ def handle_variant_update(payload):
             image_id = variant.get("image_id")
             inventory = variant.get("inventory_quantity", 0)
             price = variant.get("price", "0")
+
+            if inventory <= 0:
+                continue
+
             option_values = [
                 variant.get('option1', ''),
                 variant.get('option2', ''),
@@ -128,13 +146,12 @@ def handle_variant_update(payload):
 
             image_file_name = f"{variant_id}.jpg"
             image_url = None
-
             for image in product.get("images", []):
                 if image["id"] == image_id:
                     image_url = image["src"]
                     break
 
-            if inventory > 0 and image_url:
+            if image_url:
                 for folder in filter(None, [girls_directory, boys_directory]):
                     image_path = os.path.join(folder, image_file_name)
                     changed = download_image_if_new(image_url, image_path)
@@ -142,9 +159,13 @@ def handle_variant_update(payload):
                         folder_name = "girls" if folder.endswith("girls") else "boys"
                         add_price_to_image(image_path, price, size_option, folder_name, variant_id)
                         print(f"✅ Updated image for variant {variant_id} at {image_path}")
-            else:
-                for folder in filter(None, [girls_directory, boys_directory]):
-                    image_path = os.path.join(folder, image_file_name)
-                    if os.path.exists(image_path):
-                        os.remove(image_path)
-                        print(f"❌ Deleted image for out-of-stock variant {variant_id} from {image_path}")
+
+def process_all_available_variants():
+    print("📦 Fetching products from Shopify...")
+    all_products = fetch_all_products()
+    print(f"✅ {len(all_products)} products fetched")
+    payload = {"products": all_products}
+    handle_variant_update(payload)
+
+if __name__ == "__main__":
+    process_all_available_variants()
