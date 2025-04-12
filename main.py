@@ -1,4 +1,4 @@
-# irrakidsi-shopify-image/main.py (updated with resize and clearer price tag)
+# irrakidsi-shopify-image/main.py (updated to preserve aspect ratio and bolder overlay)
 
 import os
 import re
@@ -95,10 +95,11 @@ def cleanup_drive_folders():
 
 def add_price_to_image(image_path, price):
     try:
-        img = Image.open(image_path).convert("RGB").resize((800, 800))
+        img = Image.open(image_path).convert("RGB")
+        img.thumbnail((800, 800), Image.LANCZOS)
         draw = ImageDraw.Draw(img)
         try:
-            font = ImageFont.truetype("arial.ttf", 60)  # Larger font
+            font = ImageFont.truetype("arialbd.ttf", 60)  # Bold and bigger font
         except IOError:
             font = ImageFont.load_default()
         price_text = f"{int(float(price))} DH"
