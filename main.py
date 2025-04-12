@@ -1,4 +1,4 @@
-# irrakidsi-shopify-image/main.py (Google Drive API version, no rclone, folders fixed)
+# irrakidsi-shopify-image/main.py (Google Drive API version with nested folder support)
 
 import os
 import re
@@ -18,31 +18,54 @@ API_KEY = os.getenv("SHOPIFY_API_KEY", "your_api_key")
 PASSWORD = os.getenv("SHOPIFY_PASSWORD", "your_password")
 STORE_URL = os.getenv("SHOPIFY_STORE_URL", "https://yourstore.myshopify.com")
 
-# Google Drive folder ID to upload images to
-GOOGLE_DRIVE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID", "your-folder-id")
+# Google Drive base folder
+GDRIVE_BASE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID", "your-folder-id")
 SERVICE_ACCOUNT_FILE = os.getenv("GDRIVE_CREDENTIALS", "service_account.json")
 
-# Local temporary directory for images
-BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "C:/Irrakids stock")
+# Local base path
+BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "C:/Maison Moha Stock")
 
 app = FastAPI()
 
-# Load Google Drive service
+# Google Drive Auth
 SCOPES = ['https://www.googleapis.com/auth/drive']
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
 drive_service = build('drive', 'v3', credentials=creds)
 
+# Folder cache to avoid duplicate Drive folders
+folder_cache = {}
+
 size_pattern = re.compile(r'\b(?:XS|S|M|L|XL|XXL|XXXL)\b|\d+')
 
-# --- Utilities ---
 def sanitize_directory_name(name):
     return re.sub(r'[<>:"/\\|?*]', '_', name)
 
 def create_directory(path):
     if not os.path.exists(path):
         os.makedirs(path)
+
+def get_or_create_drive_folder(name, parent_id):
+    key = f"{parent_id}/{name}"
+    if key in folder_cache:
+        return folder_cache[key]
+
+    query = f"name='{name}' and mimeType='application/vnd.google-apps.folder' and '{parent_id}' in parents and trashed = false"
+    results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+    items = results.get('files', [])
+    if items:
+        folder_id = items[0]['id']
+    else:
+        metadata = {
+            'name': name,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [parent_id]
+        }
+        folder = drive_service.files().create(body=metadata, fields='id').execute()
+        folder_id = folder['id']
+    folder_cache[key] = folder_id
+    return folder_id
 
 def add_price_to_image(image_path, price):
     try:
@@ -52,7 +75,6 @@ def add_price_to_image(image_path, price):
             font = ImageFont.truetype("arial.ttf", 40)
         except IOError:
             font = ImageFont.load_default()
-
         price_text = f"{int(float(price))} DH"
         bbox = draw.textbbox((0, 0), price_text, font=font)
         text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -79,16 +101,21 @@ def download_image_if_new(image_url, image_path):
     except:
         return False
 
-def upload_to_drive(file_path, filename):
+def upload_to_drive_nested(file_path, size_folder, gender_folder, filename):
     try:
-        file_metadata = {'name': filename, 'parents': [GOOGLE_DRIVE_FOLDER_ID]}
+        size_folder_id = get_or_create_drive_folder(size_folder, GDRIVE_BASE_FOLDER_ID)
+        gender_folder_id = get_or_create_drive_folder(gender_folder, size_folder_id)
+        file_metadata = {
+            'name': filename,
+            'parents': [gender_folder_id]
+        }
         media = MediaFileUpload(file_path, mimetype='image/jpeg')
         file = drive_service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id'
         ).execute()
-        print(f"☁️ Uploaded {filename} to Drive with ID {file.get('id')}")
+        print(f"☁️ Uploaded {filename} → {size_folder}/{gender_folder} [ID: {file.get('id')}]")
     except Exception as e:
         print(f"⚠️ Upload failed for {filename}: {e}")
 
@@ -105,7 +132,6 @@ def process_product(product):
         option_values = [variant.get('option1', ''), variant.get('option2', ''), variant.get('option3', '')]
         size_option = next((sanitize_directory_name(v) for v in option_values if size_pattern.search(v)), "default")
 
-        # Define proper folders
         size_dir = os.path.join(BASE_IMAGE_DIR, size_option)
         girls_dir = os.path.join(size_dir, "girls") if is_girls else None
         boys_dir = os.path.join(size_dir, "boys") if is_boys else None
@@ -122,7 +148,8 @@ def process_product(product):
                 changed = download_image_if_new(image_url, image_path)
                 if changed or not os.path.exists(image_path):
                     add_price_to_image(image_path, price)
-                    upload_to_drive(image_path, f"{size_option}/{os.path.basename(folder)}/{image_name}")
+                    gender = os.path.basename(folder)
+                    upload_to_drive_nested(image_path, size_option, gender, image_name)
                     print(f"✅ Updated variant {variant_id} at {image_path}")
         else:
             for folder in filter(None, [girls_dir, boys_dir]):
@@ -131,7 +158,6 @@ def process_product(product):
                     os.remove(image_path)
                     print(f"❌ Removed out-of-stock variant image: {image_path}")
 
-# --- Webhook ---
 @app.post("/webhook")
 async def webhook_listener(request: Request):
     payload = await request.json()
