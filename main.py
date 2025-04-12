@@ -23,7 +23,7 @@ GOOGLE_DRIVE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID", "your-folder-id")
 SERVICE_ACCOUNT_FILE = os.getenv("GDRIVE_CREDENTIALS", "service_account.json")
 
 # Local temporary directory for images
-BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "C:/Irrakids Images")
+BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "C:/Irrakids stock")
 
 app = FastAPI()
 
