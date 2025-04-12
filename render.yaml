@@ -1,11 +1,8 @@
 services:
   - type: web
-    name: shopify-image-webhook
-    runtime: python
+    name: irrakidsi-shopify-image
+    env: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host=0.0.0.0 --port=8000
-    envVars:
-      - key: API_KEY
-        value: your_shopify_api_key
-      - key: PASSWORD
-        value: your_shopify_password
+    plan: free
+    autoDeploy: true
