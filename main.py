@@ -1,4 +1,4 @@
-# irrakidsi-shopify-image/main.py (Google Drive API version with nested folder support)
+# irrakidsi-shopify-image/main.py (with Google Drive folder sync, delete, cleanup)
 
 import os
 import re
@@ -23,20 +23,17 @@ GDRIVE_BASE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID", "your-folder-id")
 SERVICE_ACCOUNT_FILE = os.getenv("GDRIVE_CREDENTIALS", "service_account.json")
 
 # Local base path
-BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "C:/Maison Moha Stock")
+BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "C:/Irrakids Stock")
 
 app = FastAPI()
 
-# Google Drive Auth
 SCOPES = ['https://www.googleapis.com/auth/drive']
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
 drive_service = build('drive', 'v3', credentials=creds)
 
-# Folder cache to avoid duplicate Drive folders
 folder_cache = {}
-
 size_pattern = re.compile(r'\b(?:XS|S|M|L|XL|XXL|XXXL)\b|\d+')
 
 def sanitize_directory_name(name):
@@ -66,6 +63,36 @@ def get_or_create_drive_folder(name, parent_id):
         folder_id = folder['id']
     folder_cache[key] = folder_id
     return folder_id
+
+def delete_from_drive(size_folder, gender_folder, filename):
+    try:
+        size_id = get_or_create_drive_folder(size_folder, GDRIVE_BASE_FOLDER_ID)
+        gender_id = get_or_create_drive_folder(gender_folder, size_id)
+        query = f"name='{filename}' and '{gender_id}' in parents and trashed = false"
+        results = drive_service.files().list(q=query, spaces='drive', fields='files(id)').execute()
+        for file in results.get('files', []):
+            drive_service.files().delete(fileId=file['id']).execute()
+            print(f"🗑️ Deleted {filename} from Drive")
+    except Exception as e:
+        print(f"⚠️ Error deleting {filename} from Drive: {e}")
+
+def cleanup_drive_folders():
+    try:
+        size_folders = drive_service.files().list(q=f"'{GDRIVE_BASE_FOLDER_ID}' in parents and trashed = false and mimeType='application/vnd.google-apps.folder'", fields="files(id, name)").execute().get('files', [])
+        for size_folder in size_folders:
+            gender_folders = drive_service.files().list(q=f"'{size_folder['id']}' in parents and trashed = false and mimeType='application/vnd.google-apps.folder'", fields="files(id, name)").execute().get('files', [])
+            for gender_folder in gender_folders:
+                images = drive_service.files().list(q=f"'{gender_folder['id']}' in parents and trashed = false", fields="files(id, name)").execute().get('files', [])
+                if not images:
+                    drive_service.files().delete(fileId=gender_folder['id']).execute()
+                    print(f"🗑️ Deleted empty gender folder {gender_folder['name']} under {size_folder['name']}")
+            # check again if size folder is empty
+            children = drive_service.files().list(q=f"'{size_folder['id']}' in parents and trashed = false", fields="files(id)").execute().get('files', [])
+            if not children:
+                drive_service.files().delete(fileId=size_folder['id']).execute()
+                print(f"🗑️ Deleted empty size folder {size_folder['name']}")
+    except Exception as e:
+        print(f"⚠️ Cleanup error: {e}")
 
 def add_price_to_image(image_path, price):
     try:
@@ -157,6 +184,8 @@ def process_product(product):
                 if os.path.exists(image_path):
                     os.remove(image_path)
                     print(f"❌ Removed out-of-stock variant image: {image_path}")
+                    gender = os.path.basename(folder)
+                    delete_from_drive(size_option, gender, image_name)
 
 @app.post("/webhook")
 async def webhook_listener(request: Request):
@@ -167,6 +196,7 @@ async def webhook_listener(request: Request):
             process_product(product)
     elif "id" in payload:
         process_product(payload)
+    cleanup_drive_folders()
     return {"status": "ok"}
 
 if __name__ == "__main__":
