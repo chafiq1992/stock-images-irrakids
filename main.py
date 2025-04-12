@@ -16,7 +16,7 @@ PASSWORD = os.getenv("SHOPIFY_PASSWORD", "your_password")
 STORE_URL = os.getenv("SHOPIFY_STORE_URL", "https://yourstore.myshopify.com")
 
 # Optional: custom base path for saving images (can be a synced folder like D:/Irrakids Images)
-BASE_IMAGE_DIR = "D:/Irrakids Images"
+BASE_IMAGE_DIR = "c:/Irrakids Images"
 
 app = FastAPI()
 
