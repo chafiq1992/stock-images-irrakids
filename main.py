@@ -5,6 +5,7 @@ import re
 import hashlib
 import requests
 import json
+import subprocess
 from fastapi import FastAPI, Request
 from PIL import Image, ImageDraw, ImageFont
 from requests.utils import parse_header_links
@@ -15,8 +16,8 @@ API_KEY = os.getenv("SHOPIFY_API_KEY", "your_api_key")
 PASSWORD = os.getenv("SHOPIFY_PASSWORD", "your_password")
 STORE_URL = os.getenv("SHOPIFY_STORE_URL", "https://yourstore.myshopify.com")
 
-# Optional: custom base path for saving images (can be a synced folder like D:/Irrakids Images)
-BASE_IMAGE_DIR = "c:/Irrakids Images"
+# Google Drive sync base folder path (mapped via Google Drive desktop app)
+BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "/irrakids-google-drive")
 
 app = FastAPI()
 
@@ -65,6 +66,13 @@ def download_image_if_new(image_url, image_path):
     except:
         return False
 
+def sync_to_drive():
+    try:
+        subprocess.run(["rclone", "copy", BASE_IMAGE_DIR, "gdrive:irrakids-images", "--drive-shared-with-me"], check=True)
+        print("✅ Synced to Google Drive")
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️ Rclone sync failed: {e}")
+
 def process_product(product):
     product_tags = product.get("tags", "").lower()
     is_girls = "girls" in product_tags
@@ -104,6 +112,9 @@ def process_product(product):
                 if os.path.exists(image_path):
                     os.remove(image_path)
                     print(f"❌ Removed out-of-stock variant {variant_id} from {image_path}")
+
+    # Sync after processing all variants
+    sync_to_drive()
 
 # --- Webhook ---
 @app.post("/webhook")
