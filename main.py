@@ -1,3 +1,5 @@
+# irrakidsi-shopify-image/main.py (Google Drive API version, no rclone, folders fixed)
+
 import os
 import re
 import hashlib
@@ -21,7 +23,7 @@ GOOGLE_DRIVE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID", "your-folder-id")
 SERVICE_ACCOUNT_FILE = os.getenv("GDRIVE_CREDENTIALS", "service_account.json")
 
 # Local temporary directory for images
-BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "/tmp/irrakids-images")
+BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "C:/Irrakids Images")
 
 app = FastAPI()
 
@@ -103,18 +105,16 @@ def process_product(product):
         option_values = [variant.get('option1', ''), variant.get('option2', ''), variant.get('option3', '')]
         size_option = next((sanitize_directory_name(v) for v in option_values if size_pattern.search(v)), "default")
 
+        # Define proper folders
         size_dir = os.path.join(BASE_IMAGE_DIR, size_option)
         girls_dir = os.path.join(size_dir, "girls") if is_girls else None
         boys_dir = os.path.join(size_dir, "boys") if is_boys else None
+
         for folder in filter(None, [girls_dir, boys_dir]):
             create_directory(folder)
 
         image_name = f"{variant_id}.jpg"
-        image_url = None
-        for img in product.get("images", []):
-            if img.get("id") == image_id:
-                image_url = img.get("src")
-                break
+        image_url = next((img.get("src") for img in product.get("images", []) if img.get("id") == image_id), None)
 
         if inventory > 0 and image_url:
             for folder in filter(None, [girls_dir, boys_dir]):
@@ -125,7 +125,11 @@ def process_product(product):
                     upload_to_drive(image_path, f"{size_option}/{os.path.basename(folder)}/{image_name}")
                     print(f"✅ Updated variant {variant_id} at {image_path}")
         else:
-            print(f"❌ Variant {variant_id} is out of stock or has no image.")
+            for folder in filter(None, [girls_dir, boys_dir]):
+                image_path = os.path.join(folder, image_name)
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                    print(f"❌ Removed out-of-stock variant image: {image_path}")
 
 # --- Webhook ---
 @app.post("/webhook")
