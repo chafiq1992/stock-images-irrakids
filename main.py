@@ -1,3 +1,5 @@
+# irrakidsi-shopify-image/main.py
+
 import os
 import re
 import hashlib
@@ -12,6 +14,9 @@ import uvicorn
 API_KEY = os.getenv("SHOPIFY_API_KEY", "your_api_key")
 PASSWORD = os.getenv("SHOPIFY_PASSWORD", "your_password")
 STORE_URL = os.getenv("SHOPIFY_STORE_URL", "https://yourstore.myshopify.com")
+
+# Optional: custom base path for saving images (can be a synced folder like D:/Irrakids Images)
+BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", os.path.join(os.getcwd(), "irrakids-images"))
 
 app = FastAPI()
 
@@ -73,7 +78,7 @@ def process_product(product):
         option_values = [variant.get('option1', ''), variant.get('option2', ''), variant.get('option3', '')]
         size_option = next((sanitize_directory_name(v) for v in option_values if size_pattern.search(v)), "default")
 
-        size_dir = os.path.join(os.getcwd(), size_option)
+        size_dir = os.path.join(BASE_IMAGE_DIR, size_option)
         girls_dir = os.path.join(size_dir, "girls") if is_girls else None
         boys_dir = os.path.join(size_dir, "boys") if is_boys else None
         for folder in filter(None, [girls_dir, boys_dir]):
