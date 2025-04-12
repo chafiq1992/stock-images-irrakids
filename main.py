@@ -1,4 +1,4 @@
-# irrakidsi-shopify-image/main.py (with Google Drive folder sync, delete, cleanup)
+# irrakidsi-shopify-image/main.py (updated with resize and clearer price tag)
 
 import os
 import re
@@ -86,7 +86,6 @@ def cleanup_drive_folders():
                 if not images:
                     drive_service.files().delete(fileId=gender_folder['id']).execute()
                     print(f"🗑️ Deleted empty gender folder {gender_folder['name']} under {size_folder['name']}")
-            # check again if size folder is empty
             children = drive_service.files().list(q=f"'{size_folder['id']}' in parents and trashed = false", fields="files(id)").execute().get('files', [])
             if not children:
                 drive_service.files().delete(fileId=size_folder['id']).execute()
@@ -96,17 +95,17 @@ def cleanup_drive_folders():
 
 def add_price_to_image(image_path, price):
     try:
-        img = Image.open(image_path).convert("RGB")
+        img = Image.open(image_path).convert("RGB").resize((800, 800))
         draw = ImageDraw.Draw(img)
         try:
-            font = ImageFont.truetype("arial.ttf", 40)
+            font = ImageFont.truetype("arial.ttf", 60)  # Larger font
         except IOError:
             font = ImageFont.load_default()
         price_text = f"{int(float(price))} DH"
         bbox = draw.textbbox((0, 0), price_text, font=font)
         text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        x, y = img.width - text_width - 20, img.height - text_height - 20
-        draw.rectangle([x - 10, y - 10, x + text_width + 10, y + text_height + 10], fill="#004AAD")
+        x, y = img.width - text_width - 30, img.height - text_height - 30
+        draw.rectangle([x - 15, y - 15, x + text_width + 15, y + text_height + 15], fill="#004AAD")
         draw.text((x, y), price_text, font=font, fill="white")
         img.save(image_path, "JPEG")
     except Exception as e:
