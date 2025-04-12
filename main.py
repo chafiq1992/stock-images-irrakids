@@ -1,14 +1,14 @@
-# irrakidsi-shopify-image/main.py
-
 import os
 import re
 import hashlib
 import requests
 import json
-import subprocess
 from fastapi import FastAPI, Request
 from PIL import Image, ImageDraw, ImageFont
 from requests.utils import parse_header_links
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 import uvicorn
 
 # Shopify credentials
@@ -16,10 +16,21 @@ API_KEY = os.getenv("SHOPIFY_API_KEY", "your_api_key")
 PASSWORD = os.getenv("SHOPIFY_PASSWORD", "your_password")
 STORE_URL = os.getenv("SHOPIFY_STORE_URL", "https://yourstore.myshopify.com")
 
-# Google Drive sync base folder path (mapped via Google Drive desktop app)
-BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "/irrakids-google-drive")
+# Google Drive folder ID to upload images to
+GOOGLE_DRIVE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID", "your-folder-id")
+SERVICE_ACCOUNT_FILE = os.getenv("GDRIVE_CREDENTIALS", "service_account.json")
+
+# Local temporary directory for images
+BASE_IMAGE_DIR = os.getenv("IRRAKIDS_IMAGE_DIR", "/tmp/irrakids-images")
 
 app = FastAPI()
+
+# Load Google Drive service
+SCOPES = ['https://www.googleapis.com/auth/drive']
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES
+)
+drive_service = build('drive', 'v3', credentials=creds)
 
 size_pattern = re.compile(r'\b(?:XS|S|M|L|XL|XXL|XXXL)\b|\d+')
 
@@ -66,12 +77,18 @@ def download_image_if_new(image_url, image_path):
     except:
         return False
 
-def sync_to_drive():
+def upload_to_drive(file_path, filename):
     try:
-        subprocess.run(["rclone", "copy", BASE_IMAGE_DIR, "gdrive:irrakids-images", "--drive-shared-with-me"], check=True)
-        print("✅ Synced to Google Drive")
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️ Rclone sync failed: {e}")
+        file_metadata = {'name': filename, 'parents': [GOOGLE_DRIVE_FOLDER_ID]}
+        media = MediaFileUpload(file_path, mimetype='image/jpeg')
+        file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+        print(f"☁️ Uploaded {filename} to Drive with ID {file.get('id')}")
+    except Exception as e:
+        print(f"⚠️ Upload failed for {filename}: {e}")
 
 def process_product(product):
     product_tags = product.get("tags", "").lower()
@@ -105,16 +122,10 @@ def process_product(product):
                 changed = download_image_if_new(image_url, image_path)
                 if changed or not os.path.exists(image_path):
                     add_price_to_image(image_path, price)
+                    upload_to_drive(image_path, f"{size_option}/{os.path.basename(folder)}/{image_name}")
                     print(f"✅ Updated variant {variant_id} at {image_path}")
         else:
-            for folder in filter(None, [girls_dir, boys_dir]):
-                image_path = os.path.join(folder, image_name)
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-                    print(f"❌ Removed out-of-stock variant {variant_id} from {image_path}")
-
-    # Sync after processing all variants
-    sync_to_drive()
+            print(f"❌ Variant {variant_id} is out of stock or has no image.")
 
 # --- Webhook ---
 @app.post("/webhook")
